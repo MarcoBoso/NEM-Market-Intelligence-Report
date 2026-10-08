@@ -21,13 +21,9 @@ library(DT)
 library(knitr)
 ```
 
-## 1. Settings
-
 ```{r settings}
 NEM_REGIONS <- c("NSW1", "QLD1", "VIC1", "SA1", "TAS1")
 
-# AEMO's daily archive starts around 27 September 2025, and the newest
-# days are published with a delay of about 2 to 3 days
 FIRST_DATE <- as.Date("2026-05-01")
 LAST_DATE  <- Sys.Date() - 4
 
@@ -43,13 +39,11 @@ options(aemo.cache_dir = CACHE_DIR)
 aemo_throttle(0.5)
 ```
 
-## 2. Download
 
 ```{r download, include=FALSE}
 ARCHIVE_URL <- "http://nemweb.com.au/Reports/ARCHIVE/DispatchIS_Reports/PUBLIC_DISPATCHIS_%s.zip"
 options(timeout = 900)
 
-# Reads one AEMO dispatch CSV and returns price and demand by region
 read_dispatch_csv <- function(path) {
   lines <- readLines(path, warn = FALSE)
 
@@ -67,14 +61,12 @@ read_dispatch_csv <- function(path) {
   r <- get_table("REGIONSUM")
   if (is.null(p) || is.null(r)) return(NULL)
 
-  # intervention = 0 is the pricing run, which is where official prices come from
   p <- p[p$intervention == "0", c("settlementdate", "regionid", "rrp")]
   r <- r[r$intervention == "0", c("settlementdate", "regionid", "totaldemand")]
   merge(p, r, by = c("settlementdate", "regionid"))
 }
 
-# Downloads one daily archive file (it holds 288 zipped 5-minute files)
-# and keeps only the columns the dashboard needs
+
 fetch_day <- function(day) {
   out <- file.path(RAW_DIR, sprintf("day_%s.rds", format(day, "%Y%m%d")))
   if (file.exists(out)) return(out)
@@ -96,7 +88,6 @@ fetch_day <- function(day) {
   for (z in list.files(inner_dir, pattern = "\\.zip$", full.names = TRUE)) {
     utils::unzip(z, exdir = csv_dir)
   }
-  # In case a daily file holds CSVs directly instead of nested zips
   csvs <- c(list.files(csv_dir,   pattern = "\\.csv$", ignore.case = TRUE, full.names = TRUE),
             list.files(inner_dir, pattern = "\\.csv$", ignore.case = TRUE, full.names = TRUE))
   if (length(csvs) == 0) stop("The daily file contains no CSV files")
@@ -118,7 +109,6 @@ fetch_day <- function(day) {
   out
 }
 
-# Tries each day up to 3 times. A 404 means the day is not in the archive, so it is not retried
 fetch_with_retry <- function(d, tries = 3) {
   for (i in seq_len(tries)) {
     t0  <- Sys.time()
@@ -135,7 +125,6 @@ fetch_with_retry <- function(d, tries = 3) {
 }
 
 if (TEST_MODE) {
-  # Quick test: last few hours from NEMweb's Current folder
   now     <- Sys.time()
   start_t <- now - TEST_HOURS * 3600
 
@@ -156,7 +145,7 @@ if (TEST_MODE) {
   days  <- seq(FIRST_DATE, LAST_DATE, by = "day")
   files <- vapply(days, function(d) {
     f <- fetch_with_retry(d)
-    Sys.sleep(1)    # small pause between days so AEMO does not reset the connection
+    Sys.sleep(1)    
     f
   }, character(1))
 
@@ -167,8 +156,6 @@ if (TEST_MODE) {
   raw <- bind_rows(lapply(files, readRDS))
 }
 ```
-
-## 3. Clean data
 
 ```{r clean, include=FALSE}
 raw <- as.data.frame(raw)
@@ -194,7 +181,6 @@ nem <- raw |>
 cat("Rows:", nrow(nem), "| From", format(min(nem$date)), "to", format(max(nem$date)))
 ```
 
-## 4. Metrics
 
 ```{r metrics, include=FALSE}
 monthly <- nem |>
@@ -230,7 +216,7 @@ spikes <- nem |>
   )
 ```
 
-## 5. Latest month at a glance
+## 1. Latest month at a glance
 
 ```{r latest}
 latest_month <- max(monthly$month)
@@ -251,7 +237,7 @@ monthly |>
 
 This table covers only the first four days of October, so it is a snapshot of recent conditions and not a month comparable to the previous ones. NSW1 has the highest average price (**90.1 AUD/MWh**) and QLD1 the lowest (**53.7**), and **34.4%** of QLD1 intervals priced below zero. The demand-weighted price is above the simple average in every region, with the widest gap in QLD1 (**64.5 vs 53.7**). That gap arises because negative prices occur in low-demand midday hours, which the simple average counts in full and the demand weighting discounts. SA1 is the only region with intervals above 300 AUD/MWh (**0.17%**) and it records the highest maximum (390), which is consistent with its heavier upper tail in section 11.1.
 
-## 6. Monthly average price
+## 2. Monthly average price
 
 ```{r plot-monthly}
 p <- ggplot(monthly, aes(month, avg_price, colour = regionid)) +
@@ -264,7 +250,7 @@ ggplotly(p)
 
 Average prices fall through the winter-to-spring transition, and **September is the cheapest month in SA1 (37.7), TAS1 (38.9) and VIC1 (36.8)**. QLD1 declines every month, from **76.3 in May to 53.7** in early October, while NSW1 is the most stable region, between 65 and 83 AUD/MWh until September. SA1's **125.7 in June** is not a normal level for the region. It reflects, in good part, the scarcity prices of 21 and 22 June, and it falls back to **95.9 in July and 71.6 in August**. The October values rely on four days and should not be read as a reversal, even though NSW1 rises to 90.2. Monthly averages in this market are heavily influenced by a few extreme intervals, so a median or trimmed mean gives a better view of the underlying price level.
 
-## 7. Share of intervals with negative prices
+## 3. Share of intervals with negative prices
 
 ```{r plot-negative}
 p <- ggplot(monthly, aes(month, pct_negative, colour = regionid)) +
@@ -277,7 +263,7 @@ ggplotly(p)
 
 The share of five-minute intervals with negative prices rises towards spring in almost every region. NSW1 moves from **0.4% in June to 10.4% in September**, TAS1 reaches **21.2%**, VIC1 **23.6%** and SA1 **30.2%**. QLD1 shows the clearest trend, from **6.2% in May to 16.7% in September and 34.4% in the first days of October**. SA1 and VIC1 already had **11%** to **20%** of negative intervals between May and August, so their exposure is structural, whereas in NSW1 and TAS1 it is new and seasonal. For a solar or wind generator selling at the spot price, a growing part of production is sold at zero or negative value, and this chart should be read together with the shape discount in section 11.3.
 
-## 8. Average price by hour of day (duck curve)
+## 4. Average price by hour of day (duck curve)
 
 ```{r plot-hourly, fig.height=7}
 p <- ggplot(hourly, aes(hour, avg_price, colour = year)) +
@@ -290,7 +276,7 @@ ggplotly(p)
 
 Every region shows the typical NEM duck pattern, with the l**owest prices between 10:00 and 15:00** and the highest in the **evening peak from 17:00 to 19:00**. The daily swing is widest in **QLD1 (22 AUD/MWh at 10:00 to 103 at 17:00)** and **VIC1 (34 to 105)**, and narrowest in **TAS1 (48 to 103)**. The deep midday troughs in QLD1 and VIC1 match their high shares of negative intervals. The SA1 peaks at **07:00 (187)** and **19:00 (145)** are not a daily pattern. They come from a handful of extreme intervals, mainly 22 June between 07:15 and 07:55 and the evenings of 21 June and 8 July, which lift an otherwise normal level of roughly 90 to 110 AUD/MWh. Using the median instead of the mean would remove that distortion.
 
-## 9. Top 20 price spikes
+## 5. Top 20 price spikes
 
 ```{r spikes}
 datatable(spikes, rownames = FALSE, options = list(pageLength = 10, dom = "tp"))
@@ -303,26 +289,22 @@ library(quantreg)
 
 n_days <- n_distinct(nem$date)
 
-# Technical floors only: the price model drops the first 7 days (weekly lag),
-# and k-means needs more days than clusters. Everything above that runs.
 enough_for_price_model <- n_days >= 10
 enough_for_clusters    <- n_days >= 4
 
 if (n_days < 35) {
-  cat("Preview mode:", n_days, "days of data. The models run, but with so little history",
-      "the results are only meant to show the format of the charts. Use at least 5 weeks",
-      "for real conclusions.")
+  cat("Preview mode:", n_days, "days of data. The models run, but with so little history")
 }
 ```
 
 The 20 highest prices all fall on **four dates, 21 June, 22 June, 8 July and 13 July**, which is 2.5% of the 157 days. On 22 June SA1 stayed at about **20,300 AUD/MWh for 10 consecutive intervals** between 07:15 and 08:00, with demand of 1,820 to 2,170 MW. On 8 July **VIC1 reached 19,070 with 8,313 MW of demand**, while TAS1 and SA1 rose together above **16,900 in the same interval**. In both regions demand was at or near the top of its observed range, which suggests demand-driven scarcity during winter peaks, although confirming the cause would need generation and outage data. The repeated 20,300 values in June and the 23,200 in July look like the market price ceiling, which appears to change between the two months, and this should be checked against AEMO's published figure. The simultaneous spikes in VIC1, TAS1 and SA1 also show how interconnection spreads scarcity between regions.
 
-### 10.1 Model 1: price forecast with uncertainty band
+## 6 Predictive models
+### 6.1 Model 1: price forecast with uncertainty band
 
 The **model predicts the hourly price from the same hour yesterday, the same hour last week, yesterday's demand and calendar effects**. It uses quantile regression, which gives a central forecast (median) and an 80% band (10th to 90th percentile). That suits prices better than a single number, because NEM prices have large spikes. It is compared with a simple baseline, "same hour last week".
 
 ```{r price-model, eval=enough_for_price_model}
-# 1. Hourly series per region, with a complete time grid so lags are correct
 series <- nem |>
   mutate(hour_ts = floor_date(ts, "hour")) |>
   group_by(regionid, hour_ts) |>
@@ -342,20 +324,17 @@ series <- nem |>
   ungroup() |>
   filter(!is.na(price), !is.na(lag24), !is.na(lag168), !is.na(demand_lag24))
 
-# 2. Time-based split. The test window is half of the usable days, at most 14
 series_days <- as.numeric(difftime(max(series$hour_ts), min(series$hour_ts), units = "days"))
 TEST_DAYS   <- max(1, min(14, floor(series_days / 2)))
 cutoff      <- max(series$hour_ts) - days(TEST_DAYS)
 TAUS        <- c(0.1, 0.5, 0.9)
 
-# Day-of-week effects need at least two weeks of training data
 fm <- if (series_days - TEST_DAYS >= 14) {
   price ~ hr + dow + lag24 + lag168 + demand_lag24
 } else {
   price ~ hr + lag24 + lag168 + demand_lag24
 }
 
-# 3. One model per region. A region that fails is skipped, the others still run
 preds <- lapply(split(series, series$regionid), function(d) {
   tr <- filter(d, hour_ts <= cutoff)
   te <- filter(d, hour_ts >  cutoff)
@@ -374,7 +353,6 @@ preds <- lapply(split(series, series$regionid), function(d) {
 
 if (nrow(preds) == 0) stop("The price model could not be fitted for any region. See the messages above.")
 
-# 4. Accuracy on the test period
 preds |>
   group_by(regionid) |>
   summarise(
@@ -408,7 +386,7 @@ ggplotly(p)
 
 The chart compares actual NSW1 prices with the median forecast and the 80% band over the **21 September to 4 October** test window. **80.4%** of hours fall inside the band, so it is well calibrated overall, but the actual price exceeds the upper limit in **48 hours** and falls below the lower limit in only 18, which shows that errors are skewed to the upside. Accuracy is weakest in the solar hours, with an MAE of **30 to 37 AUD/MWh between 11:00 and 15:00**, against **13 to 17 between 16:00 and 23:00**, because midday prices are the most volatile. The largest miss is on the first test day, when the 16:00 price was **156 against an upper limit of 55**, followed by 24 September, with **221 against 131 at 05:00 and 215 against 125 at 00:00**. The average actual price (83.2) is above the average median forecast (71.3), which is expected in a right-skewed distribution, where the median sits below the mean and the upper band is where that risk should appear.
 
-### 10.2 Model 2: typical daily demand patterns by region
+### 6.2 Model 2: typical daily demand patterns by region
 
 For each region, complete days are grouped with k-means according to the shape of their 24-hour demand curve (demand divided by the daily average, so the pattern matters and not the size). The clusters usually separate weekdays, weekends and unusual days such as extreme heat or cold. With few days, the number of clusters is reduced automatically.
 
@@ -416,7 +394,6 @@ For each region, complete days are grouped with k-means according to the shape o
 K <- 3
 set.seed(42)
 
-# Daily profiles: 24 hourly values per region and day, complete days only
 profiles <- nem |>
   filter(!is.na(demand_mw)) |>
   group_by(regionid, date, hour) |>
@@ -455,7 +432,6 @@ centers_long <- bind_rows(lapply(names(fits), function(r) {
 ```
 
 ```{r demand-clusters-plot, eval=enough_for_clusters, fig.height=7}
-# Typical shape of each cluster (1 = daily average demand)
 p <- ggplot(centers_long, aes(hour, shape, colour = cluster)) +
   geom_line(linewidth = 1) +
   facet_wrap(~regionid) +
@@ -468,7 +444,6 @@ ggplotly(p)
 In every region the evening ramp is the most stable feature, with demand reaching **1.2 to 1.5 times the daily average between 17:00 and 20:00** in all groups. What separates the groups is the depth of the midday trough, which reflects rooftop solar and commercial load. In **NSW1, QLD1 and VIC1** one group has a clearly deeper trough (**0.66 to 0.68 of the daily average around midday**), while the other groups are shallower or flat. **SA1 is the outlier**, with a group whose midday demand falls to just 0.13 of the daily average at 13:00 and rises to 1.5 in the evening, a shape that implies almost no grid demand at noon. TAS1 stays between about 0.85 and 1.16 in all groups, with morning and evening peaks and no midday collapse.
 
 ```{r demand-clusters-weekday, eval=enough_for_clusters, fig.height=7}
-# Which weekdays fall into each cluster
 p <- day_clusters |>
   count(regionid, cluster, dow) |>
   ggplot(aes(dow, cluster, fill = n)) +
@@ -483,9 +458,9 @@ ggplotly(p)
 
 In **QLD1, VIC1 and NSW1 the deep-trough group is a weekend group, with 22 of 39 days (56%), 18 of 35 (51%) and 13 of 30 (43%)** falling on Saturday or Sunday. In SA1 the 20 days of the extreme group are spread evenly across the week, with 2 to 4 days per weekday, so that pattern is driven by weather and solar output and not by the calendar. A weekend dummy therefore explains the main demand shape in three regions, but not in SA1, where a weather variable would add real information. Group numbers are arbitrary within each region and cannot be compared across regions.
 
-## 11. Market analytics
+## 7. Market analytics
 
-### 11.1 Price duration curves
+### 7.1 Price duration curves
 
 Share of time that the price stays at or above each level. The flatter the left side, the less exposed a region is to spikes. The curve crossing zero shows how often prices are negative. The vertical axis is capped at 400 AUD/MWh so the shape stays readable.
 
@@ -510,7 +485,7 @@ ggplotly(p)
 
 **SA1 is the most exposed on both sides**, with about **18.5% of time at negative prices, 32.5% of time above 100 AUD/MWh**, around 2% above 300, and a top 1% of prices starting at about 400. **NSW1 is the flattest**, with about **3% of time at negative prices and only 1% of time above roughly 200**. VIC1 combines about 15.5% of time at negative prices with the lowest median price (60 AUD/MWh), while NSW1 and TAS1 have the highest (77). Average price alone hides very different risk profiles, which matters when pricing a baseload hedge or a PPA.
 
-### 11.2 Regional price premium by hour
+### 7.2 Regional price premium by hour
 
 Average difference between each region's price and the average of all regions in the same interval. Red means the region is more expensive than the rest at that hour, blue means cheaper. It shows where and when the network separates prices.
 
@@ -536,7 +511,7 @@ ggplotly(p)
 
 Over the full day **SA1 is the most expensive region (+11.0 AUD/MWh) and VIC1 the cheapest (-10.6)**, with NSW1 at +7.1, TAS1 at -2.5 and QLD1 at -5.0. **QLD1 is the cheapest region during the day** (-33 at 07:00 and between -26 and -6 from 08:00 to 15:00), which matches its midday trough in section 8, while NSW1 is 12 to 14 AUD/MWh above the average overnight. VIC1 is below the average in every hour, between -23 and -2. The SA1 values at 07:00 (+92) and 19:00 (+36) are driven by the June and July events, and because the benchmark is the mean of all regions, they also push the other four regions down at those hours. A version based on the median would show the regular spreads more cleanly.
 
-### 11.3 Solar shape discount (stylised profile)
+### 7.3 Solar shape discount (stylised profile)
 
 Price a solar plant would capture minus the baseload price, by month. This uses a stylised solar profile (a bell curve between 6am and 6pm), not real plant output, so read it as the direction of the effect. A negative value means that solar hours are cheaper than the average hour, which is the core problem for pay-as-produced PPAs.
 
@@ -565,7 +540,7 @@ ggplotly(p)
 
 **The discount deepens from May to September in every region**. TAS1 (**+1.5 and +3.6**) and VIC1 (**-8.5 and +1.8**) had little or no discount in May and June, but in September no region is better than -29 AUD/MWh. In practice September capture prices would be about **32 AUD/MWh in NSW1, 18 in QLD1 and close to zero in SA1**, against baseload prices of 65, 57 and 38. That is a discount of roughly half in NSW1, two thirds in QLD1 and almost all of the value in SA1. QLD1 reaches -53.4 in the first days of October. A pay-as-produced PPA cannot be priced from the baseload average, and replacing the stylised profile with actual solar generation by unit would turn this indicative figure into a real capture price.
 
-### 11.4 Price response to demand
+### 7.4 Price response to demand
 
 Regions are split into 40 demand levels. The line is the median price at each level and the band goes from the 10th to the 90th percentile. A curve that bends sharply upward at high demand shows a tight supply side, and a wide band shows that price depends on more than demand.
 
@@ -595,7 +570,7 @@ ggplotly(p)
 
 In **NSW1 it goes from 43 AUD/MWh at low demand to 77 at medium demand and 97 near the 90th percentile**, and reaches 129 in the highest bin. QLD1 and VIC1 have a median close to zero at the lowest demand levels (0 and 2), which links low demand to the negative-price regime of the solar hours. **TAS1 is the least demand-sensitive (from 67 to 107), whereas SA1 has the widest band**, with the 90th percentile close to 350 and the 10th close to -100. The wide bands show that demand alone explains little of the price, and that renewable output, interconnector flows and outages explain much of the rest, so a demand-only model would be weak.
 
-### 11.5 Historical value of a cap
+### 7.5 Historical value of a cap
 
 Average payoff per MWh of a cap with a 300 AUD/MWh strike, by region and month. It is what the cap would have paid on average in that period. It is not a market quote, but it gives a reference point to compare with the premiums that sellers ask for.
 
